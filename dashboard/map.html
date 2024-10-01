@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NYC Taxi Visualization</title>
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.css' rel='stylesheet' />
+    <script src="https://unpkg.com/h3-js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #metrics, #vendor-select, #pickup-select {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        #vendor-select {
+            top: 10px;
+            bottom: auto;
+        }
+
+        #pickup-select {
+            top: 60px;
+            bottom: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="vendor-select">
+        <label for="vendor">Select Vendor:</label>
+        <select id="vendor">
+            <option value="1" selected>Vendor 1</option>
+            <option value="2">Vendor 2</option>
+        </select>
+    </div>
+    <div id="pickup-select">
+        <label for="pickup_or_dropoff">Pickup or Dropoff:</label>
+        <select id="pickup_or_dropoff">
+            <option value="pickup" selected>Pickup</option>
+            <option value="dropoff">Dropoff</option>
+        </select>
+    </div>
+    <div id="metrics"></div>
+
+    <script>
+        mapboxgl.accessToken = 'your_mapbox_access_token';
+
+        const nycDefaults = {
+            west: -76,
+            east: -72,
+            south: 35.5,
+            north: 45.3
+        };
+
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/dark-v10',
+            center: [(nycDefaults.west + nycDefaults.east) / 2, (nycDefaults.south + nycDefaults.north) / 2],
+            zoom: 5
+        });
+
+        const tinybirdToken = 'your_tinybird_token';
+
+        map.on('load', () => {
+            const bounds = [
+                [nycDefaults.west - 2, nycDefaults.south - 2],
+                [nycDefaults.east + 2, nycDefaults.north + 2]
+            ];
+            map.setMaxBounds(bounds);
+
+            // Add source for hexagons
+            map.addSource('hexagons', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] }
+            });
+
+            // Add layer for hexagons
+            map.addLayer({
+                id: 'hexagons-layer',
+                type: 'fill',
+                source: 'hexagons',
+                paint: {
+                    'fill-color': [
+                        'interpolate',
+                        ['linear'],
+                        ['get', 'point_count'],
+                        0, 'rgba(255, 255, 255, 0)',
+                        1, 'rgba(255, 255, 0, 0.5)',
+                        10, 'rgba(255, 165, 0, 0.6)',
+                        100, 'rgba(255, 69, 0, 0.7)',
+                        1000, 'rgba(255, 0, 0, 0.8)',
+                        10000, 'rgba(128, 0, 0, 1)'
+                    ],
+                    'fill-opacity': 0.7
+                }
+            });
+
+
+            updateData();
+        });
+
+        map.on('moveend', updateData);
+
+        function getResolutionFromZoom(zoom) {
+            return Math.min(Math.max(Math.floor(zoom) - 2, 4), 12);
+        }
+
+        document.getElementById('vendor').addEventListener('change', updateData);
+        document.getElementById('pickup_or_dropoff').addEventListener('change', updateData);
+
+        async function updateData() {
+            const bounds = map.getBounds();
+            const zoom = map.getZoom();
+            const resolution = getResolutionFromZoom(zoom);
+
+            const vendor = document.getElementById('vendor').value;
+            const pickup_or_dropoff = document.getElementById('pickup_or_dropoff').value;
+            
+            // Update the region accordingly
+            const url = `https://api.us-east.tinybird.co/v0/pipes/nyc_taxi_geo.json?token=${tinybirdToken}&res=${resolution}&north=${bounds.getNorth()}&south=${bounds.getSouth()}&east=${bounds.getEast()}&west=${bounds.getWest()}&pickup_or_dropoff=${pickup_or_dropoff}&vendor=${vendor}`;
+
+            const startTime = performance.now();
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Accept-Encoding': 'gzip',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                const endTime = performance.now();
+
+                const hexFeatures = data.data.map(item => ({
+                    type: 'Feature',
+                    properties: {
+                        point_count: item.point_count
+                    },
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [item.h3_boundary.map(coord => [coord[1], coord[0]])]
+                    }
+                }));
+
+                // Update hexagon source
+                map.getSource('hexagons').setData({
+                    type: 'FeatureCollection',
+                    features: hexFeatures
+                });
+
+                // Calculate global min and max for point counts
+                const pointCounts = hexFeatures.map(f => f.properties.point_count);
+                const globalMinCount = Math.min(...pointCounts);
+                const globalMaxCount = Math.max(...pointCounts);
+
+                // Update performance metrics
+                const roundtripTime = endTime - startTime;
+                const dataSize = parseFloat(response.headers.get('content-length') || '0') / 1024;  // Size in KB
+                const compressionRatio = parseFloat(response.headers.get('x-original-content-length') || '0') / parseFloat(response.headers.get('content-length') || '1');
+                const dbLatency = data.statistics.elapsed * 100
+
+                document.getElementById('metrics').innerHTML = `
+                    Query latency: ${dbLatency.toFixed(2)} ms<br>
+                    Roundtrip time: ${roundtripTime.toFixed(2)} ms<br>
+                    Data fetched: ${dataSize.toFixed(2)} KB<br>
+                    Compression ratio: ${compressionRatio.toFixed(2)}x<br>
+                    Hexagons: ${hexFeatures.length}<br>
+                    Zoom: ${zoom.toFixed(2)}<br>
+                    Resolution: ${resolution}<br>
+                    MinCount: ${globalMinCount}<br>
+                    MaxCount: ${globalMaxCount}
+                `;
+            } catch (error) {
+                console.error('Error in updateData:', error);
+                document.getElementById('metrics').innerHTML = `
+                    Error: ${error.message}<br>
+                    Zoom: ${zoom.toFixed(2)}<br>
+                    Resolution: ${resolution}
+                `;
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,63 @@
+TOKEN "map_token" READ
+
+NODE pickups
+SQL >
+
+    %
+    SELECT
+        geoToH3(pickup_longitude, pickup_latitude, {{ UInt8(res, 4) }}) as h3_index,
+        arrayMap(
+            x -> (
+                round(x.1, toInt8(ceil({{ UInt8(res, 4) }} / 2))),
+                round(x.2, toInt8(ceil({{ UInt8(res, 4) }} / 2)))
+            ),
+            h3ToGeoBoundary(h3_index)
+        ) AS h3_boundary,
+        count() AS point_count
+    FROM nyc_taxis
+    WHERE
+        vendorid = {{ Int16(vendor, 1) }}
+        AND pickup_longitude BETWEEN {{ Float64(west, -76) }} AND {{ Float64(east, -72) }}
+        AND pickup_latitude BETWEEN {{ Float64(south, 35.5) }} AND {{ Float64(north, 45.3) }}
+    GROUP BY h3_index
+
+
+
+NODE dropoffs
+SQL >
+
+    %
+    SELECT
+        geoToH3(dropoff_longitude, dropoff_latitude, {{ UInt8(res, 4) }}) as h3_index,
+        arrayMap(
+            x -> (
+                round(x.1, toInt8(ceil({{ UInt8(res, 4) }} / 2))),
+                round(x.2, toInt8(ceil({{ UInt8(res, 4) }} / 2)))
+            ),
+            h3ToGeoBoundary(h3_index)
+        ) AS h3_boundary,
+        count() AS point_count
+    FROM nyc_taxis
+    WHERE
+        vendorid = {{ Int16(vendor, 1) }}
+        AND dropoff_longitude BETWEEN {{ Float64(west, -76) }} AND {{ Float64(east, -72) }}
+        AND dropoff_latitude BETWEEN {{ Float64(south, 35.5) }} AND {{ Float64(north, 45.3) }}
+    GROUP BY h3_index
+
+
+
+NODE endpoint
+SQL >
+
+    %
+    {% if not defined(pickup_or_dropoff) %}
+      {{ error('pickup_or_dropoff is required and must be pickup or dropoff') }}
+    {% end %}
+
+    SELECT h3_boundary, point_count
+    FROM
+        {% if pickup_or_dropoff == 'pickup' %} pickups
+        {% else %} dropoffs
+        {% end %}
+
+

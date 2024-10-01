@@ -1,0 +1,25 @@
+
+SCHEMA >
+    `vendorid` Int16,
+    `tpep_pickup_datetime` DateTime,
+    `tpep_dropoff_datetime` DateTime,
+    `passenger_count` Int16,
+    `trip_distance` Float32,
+    `pickup_longitude` Float64,
+    `pickup_latitude` Float64,
+    `ratecodeid` Int16,
+    `store_and_fwd_flag` String,
+    `dropoff_longitude` Float64,
+    `dropoff_latitude` Float64,
+    `payment_type` Int16,
+    `fare_amount` Float32,
+    `extra` Float32,
+    `mta_tax` Float32,
+    `tip_amount` Float32,
+    `tolls_amount` Float32,
+    `improvement_surcharge` Float32,
+    `total_amount` Float32
+
+ENGINE "MergeTree"
+ENGINE_PARTITION_KEY "toYear(tpep_pickup_datetime)"
+ENGINE_SORTING_KEY "vendorid, tpep_pickup_datetime, pickup_longitude, pickup_latitude"
