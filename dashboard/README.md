@@ -6,7 +6,7 @@ The app uses [Mapbox GL JS](https://docs.mapbox.com/mapbox-gl-js/guides), a clie
 
 **You will need to create an access token to make API requests.**
 
-![Taxi Map](image.png)
+![Taxi Map](../image.png)
 
 ## Deploying the app
 
